@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FNF Chart Porter</title>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f2fb;--panel:#fff;--ink:#1a1530;--mute:#6a6486;--line:#d8d3ec;--accent:#7a3cf0;--on:#fff;--l:#c24b99;--d:#00c8ff;--u:#12c85a;--r:#f9393f;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#120e22;--panel:#1c1633;--ink:#f0ecff;--mute:#a49dc6;--line:#33294f;--accent:#a47bff}}
+:root[data-theme="dark"]{--bg:#120e22;--panel:#1c1633;--ink:#f0ecff;--mute:#a49dc6;--line:#33294f;--accent:#a47bff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 Rubik,system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 40px}
+h1{font-weight:800;font-size:28px;margin:0 0 4px;display:flex;align-items:center;gap:12px}
+.lanes{display:flex;gap:4px}
+.lanes i{width:22px;height:22px;border-radius:5px;display:grid;place-items:center;font:800 13px/1 Rubik,sans-serif;color:#fff;font-style:normal}
+p.sub{margin:0 0 20px;color:var(--mute)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+label{display:block;font-weight:600;font-size:14px;margin-bottom:6px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+select,textarea,button,.file{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;width:100%;padding:10px}
+textarea{min-height:150px;resize:vertical;font:13px/1.4 ui-monospace,Menlo,monospace}
+.btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.btns>*{flex:1 1 130px;width:auto;text-align:center;cursor:pointer}
+button.go{background:var(--accent);color:var(--on);border-color:var(--accent);font-weight:800;padding:13px}
+button:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#log{margin:0;padding:0;list-style:none;font-size:14px}
+#log li{padding:6px 0;border-top:1px solid var(--line)}
+#log li:first-child{border-top:0}
+.ok{color:var(--u)}.warn{color:#d98b00}.bad{color:var(--r)}
+.small{color:var(--mute);font-size:13px;margin:8px 0 0}
+input[type=file]{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1><span class="lanes"><i style="background:var(--l)">&#8592;</i><i style="background:var(--d)">&#8595;</i><i style="background:var(--u)">&#8593;</i><i style="background:var(--r)">&#8594;</i></span>Chart Porter</h1>
+<p class="sub">Convert a Friday Night Funkin' chart between engines. It runs in your browser; nothing is uploaded.</p>
+
+<div class="card">
+  <div class="row">
+    <div><label for="from">From</label>
+      <select id="from"><option value="auto">Auto-detect</option><option value="psych">Psych Engine</option><option value="kade">Kade Engine</option><option value="codename">Codename Engine</option><option value="gapple">Gapple Chart</option></select></div>
+    <div><label for="to">To</label>
+      <select id="to"><option value="psych">Psych Engine</option><option value="kade">Kade Engine</option><option value="codename">Codename Engine</option><option value="gapple">Gapple Chart</option></select></div>
+  </div>
+</div>
+
+<div class="card">
+  <label for="src">Chart JSON</label>
+  <textarea id="src" placeholder="Paste a chart .json here, or load a file"></textarea>
+  <div class="btns">
+    <label class="file" for="fileIn" style="margin:0">Load file</label>
+    <input type="file" id="fileIn" accept=".json,application/json">
+    <button class="go" id="go">Convert</button>
+  </div>
+</div>
+
+<div class="card">
+  <label for="out">Result</label>
+  <textarea id="out" readonly placeholder="The converted chart appears here"></textarea>
+  <div class="btns"><button id="copy">Copy</button><button id="dl">Download .json</button></div>
+</div>
+
+<div class="card"><label>Report</label><ul id="log"><li class="small">Nothing converted yet.</li></ul></div>
+<p class="small">Charts are converted through a neutral format (notes, BPM changes, camera focus, events). Codename and Kade output is best-effort: test in your engine and report what breaks.</p>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const NAMES = {psych:'Psych Engine', kade:'Kade Engine', codename:'Codename Engine', gapple:'Gapple Chart'};
+let warns = [];
+const W = m => { if (!warns.includes(m)) warns.push(m); };
+
+/* ---------- readers: engine JSON -> neutral chart ---------- */
+function blank(){ return {name:'song', bpm:100, speed:1, p1:'bf', p2:'dad', gf:'gf', stage:'stage', notes:[], events:[], bpms:[], cam:[]}; }
+
+function fromSections(root){            // Psych + Kade share the section layout
+  const s = root.song && typeof root.song === 'object' ? root.song : root;
+  const ir = blank();
+  ir.name = s.song || 'song'; ir.bpm = s.bpm || 100; ir.speed = s.speed || 1;
+  ir.p1 = s.player1 || 'bf'; ir.p2 = s.player2 || 'dad'; ir.gf = s.gfVersion || s.player3 || 'gf'; ir.stage = s.stage || 'stage';
+  let bpm = ir.bpm, start = 0;
+  ir.bpms.push({t:0, bpm});
+  (s.notes || []).forEach(sec => {
+    if (sec.changeBPM && sec.bpm && sec.bpm !== bpm){ bpm = sec.bpm; ir.bpms.push({t:start, bpm}); }
+    const must = !!sec.mustHitSection;
+    ir.cam.push({t:start, player:must});
+    (sec.sectionNotes || []).forEach(n => {
+      const lane = n[1]; if (lane < 0 || lane > 7){ W('Skipped a note with lane ' + lane); return; }
+      const playerSide = lane < 4 ? must : !must;
+      ir.notes.push({t:n[0], lane:lane % 4, player:playerSide, len:n[2] || 0, type: typeof n[3] === 'string' ? n[3] : ''});
+    });
+    start += (sec.sectionBeats || (sec.lengthInSteps ? sec.lengthInSteps / 4 : 4)) * 60000 / bpm;
+  });
+  (s.events || []).forEach(e => (e[1] || []).forEach(x => ir.events.push({t:e[0], name:x[0], v1:x[1] == null ? '' : x[1], v2:x[2] == null ? '' : x[2], vals:x.slice(1)})));
+  (s.eventObjects || []).forEach(e => { if (e.type === 'BPM Change' || e.name === 'Init BPM') return; W('Kade event "' + e.name + '" was not carried over'); });
+  return ir;
+}
+
+function fromCodename(root){
+  const ir = blank(), meta = root.meta || {};
+  ir.name = meta.name || root.name || 'song'; ir.bpm = meta.bpm || root.bpm || 100;
+  ir.speed = root.scrollSpeed || 1; ir.stage = root.stage || 'stage';
+  ir.bpms.push({t:0, bpm:ir.bpm});
+  const types = root.noteTypes || [];
+  (root.strumLines || []).forEach(sl => {
+    if (sl.type === 2){ W('Girlfriend strumline skipped (no equivalent in the target formats)'); return; }
+    const player = sl.type === 1, ch = (sl.characters || [])[0];
+    if (ch){ if (player) ir.p1 = ch; else ir.p2 = ch; }
+    (sl.notes || []).forEach(n => ir.notes.push({t:n.time, lane:(n.id || 0) % 4, player, len:n.sLen || 0, type: n.type ? (types[n.type - 1] || String(n.type)) : ''}));
+  });
+  (root.events || []).forEach(e => {
+    const p = e.params || [];
+    if (e.name === 'Camera Movement') ir.cam.push({t:e.time, player:p[0] === 1});
+    else if (e.name === 'BPM Change'){ if (e.time > 0) ir.bpms.push({t:e.time, bpm:p[0]}); else ir.bpm = ir.bpms[0].bpm = p[0]; }
+    else ir.events.push({t:e.time, name:e.name, v1:p[0] == null ? '' : p[0], v2:p[1] == null ? '' : p[1]});
+  });
+  ir.cam.sort((a,b) => a.t - b.t); ir.bpms.sort((a,b) => a.t - b.t);
+  return ir;
+}
+
+function fromGapple(root){             // notes are {t,d,l}; events are {strumTime, events:[{type, values}]}
+  const s = root.song && typeof root.song === 'object' ? root.song : root;
+  const conv = {song:Object.assign({}, s, {
+    notes:(s.notes || []).map(sec => Object.assign({}, sec, {sectionNotes:(sec.sectionNotes || []).map(n => [n.t, n.d, n.l || 0])})),
+    events:(s.events || []).map(e => [e.strumTime, (e.events || []).map(x => [x.type].concat(x.values || []))])})};
+  return fromSections(conv);
+}
+
+/* ---------- writers: neutral chart -> engine JSON ---------- */
+const bpmAt = (ir, t) => { let b = ir.bpms[0].bpm; for (const x of ir.bpms) if (x.t <= t + 1) b = x.bpm; return b; };
+
+function toSections(ir, kade){
+  const end = Math.max(0, ...ir.notes.map(n => n.t + n.len), ...ir.cam.map(c => c.t));
+  const notes = ir.notes.slice().sort((a,b) => a.t - b.t);
+  const secs = []; let start = 0, prev = ir.bpms[0].bpm, i = 0;
+  if (ir.cam.length > 1) W('Camera changes snap to section boundaries (every 4 beats)');
+  if (ir.bpms.length > 1) W('BPM changes snap to the start of the nearest section');
+  do {
+    const bpm = bpmAt(ir, start), dur = 4 * 60000 / bpm;
+    const c = ir.cam.filter(x => x.t <= start + 1).pop(), must = c ? c.player : true;
+    const sec = {sectionNotes:[], mustHitSection:must, bpm, changeBPM: bpm !== prev, altAnim:false};
+    if (kade){ sec.lengthInSteps = 16; sec.typeOfSection = 0; } else { sec.sectionBeats = 4; sec.gfSection = false; }
+    prev = bpm;
+    for (; i < notes.length && notes[i].t < start + dur; i++){
+      const n = notes[i], arr = [n.t, (n.player === must ? 0 : 4) + n.lane, n.len];
+      if (n.type) arr.push(n.type);
+      sec.sectionNotes.push(arr);
+    }
+    secs.push(sec); start += dur;
+  } while (start <= end);
+  return secs;
+}
+
+function toPsych(ir){
+  const g = {};
+  ir.events.forEach(e => (g[e.t] = g[e.t] || []).push([e.name, String(e.v1), String(e.v2)]));
+  if (ir.events.some(e => e.vals && e.vals.length > 2)) W('Some events have more than 2 values; only the first 2 fit in Psych');
+  const events = Object.keys(g).map(Number).sort((a,b) => a - b).map(t => [t, g[t]]);
+  return {song:{song:ir.name, notes:toSections(ir, false), events, bpm:ir.bpm, needsVoices:true, speed:ir.speed,
+    player1:ir.p1, player2:ir.p2, gfVersion:ir.gf, stage:ir.stage, validScore:true}};
+}
+
+function toKade(ir){
+  if (ir.events.length) W(ir.events.length + ' event(s) dropped: Kade has no matching events');
+  return {song:{song:ir.name, notes:toSections(ir, true), bpm:ir.bpm, needsVoices:true, speed:ir.speed,
+    player1:ir.p1, player2:ir.p2, gfVersion:ir.gf, stage:ir.stage, validScore:true,
+    eventObjects:[{name:'Init BPM', position:0, value:String(ir.bpm), type:'BPM Change'}]}};
+}
+
+function toCodename(ir){
+  const types = [];
+  const idx = t => { if (!t) return 0; let k = types.indexOf(t); if (k < 0){ types.push(t); k = types.length - 1; } return k + 1; };
+  const line = (type, pos, ch, x) => ({type, position:pos, characters:[ch], visible:true, strumPos:[x, 50], strumLineScale:1, vocalsSuffix:'', notes:[]});
+  const opp = line(0, 'dad', ir.p2, 0.25), pl = line(1, 'boyfriend', ir.p1, 0.75);
+  ir.notes.slice().sort((a,b) => a.t - b.t).forEach(n => (n.player ? pl : opp).notes.push({time:n.t, id:n.lane, sLen:n.len, type:idx(n.type)}));
+  const ev = [];
+  ir.cam.forEach(c => ev.push({name:'Camera Movement', time:c.t, params:[c.player ? 1 : 0]}));
+  ir.bpms.forEach(b => { if (b.t > 0) ev.push({name:'BPM Change', time:b.t, params:[b.bpm]}); });
+  ir.events.forEach(e => ev.push({name:e.name, time:e.t, params:[e.v1, e.v2]}));
+  if (ir.events.length) W('Events were copied by name; make sure Codename has matching ones');
+  ev.sort((a,b) => a.time - b.time);
+  return {strumLines:[opp, pl], events:ev, meta:{name:ir.name, displayName:ir.name, bpm:ir.bpm, beatsPerMeasure:4, stepsPerBeat:4},
+    stage:ir.stage, scrollSpeed:ir.speed, noteTypes:types, codenameChart:true};
+}
+
+function toGapple(ir){
+  const secs = toSections(ir, false).map(sec => {
+    const o = {sectionNotes:sec.sectionNotes.map(n => ({t:n[0], d:n[1], l:n[2]})), mustHitSection:sec.mustHitSection};
+    if (sec.changeBPM){ o.bpm = sec.bpm; o.changeBPM = true; }
+    return o;
+  });
+  if (ir.notes.some(n => n.type)) W('Note types dropped: Gapple charts have no note type field');
+  const g = {};
+  ir.events.forEach(e => (g[e.t] = g[e.t] || []).push({type:e.name, values:(e.vals || [e.v1, e.v2]).map(String)}));
+  const events = Object.keys(g).map(Number).sort((a,b) => a - b).map(t => ({strumTime:t, events:g[t]}));
+  return {song:{song:ir.name, notes:secs, events, bpm:ir.bpm, needsVoices:true, speed:ir.speed, player1:ir.p1, player2:ir.p2, hasDodge:false}};
+}
+
+/* ---------- UI ---------- */
+function firstNote(j){ const s = j.song || j; for (const sec of (s.notes || [])) if (sec.sectionNotes && sec.sectionNotes.length) return sec.sectionNotes[0]; return null; }
+function detect(j){
+  if (j.strumLines) return 'codename';
+  const n = firstNote(j);
+  if (n && !Array.isArray(n) && typeof n === 'object') return 'gapple';
+  return (j.song && j.song.eventObjects) || j.eventObjects ? 'kade' : 'psych';
+}
+
+function convert(){
+  warns = [];
+  const log = $('log'); log.innerHTML = '';
+  const add = (cls, t) => { const li = document.createElement('li'); li.className = cls; li.textContent = t; log.appendChild(li); };
+  let j;
+  try { j = JSON.parse($('src').value); } catch (e){ add('bad', 'That is not valid JSON: ' + e.message); return; }
+  const from = $('from').value === 'auto' ? detect(j) : $('from').value, to = $('to').value;
+  let ir;
+  try { ir = from === 'codename' ? fromCodename(j) : from === 'gapple' ? fromGapple(j) : fromSections(j); }
+  catch (e){ add('bad', 'Could not read this as a ' + NAMES[from] + ' chart: ' + e.message); return; }
+  if (!ir.notes.length){ add('bad', 'No notes found. Check the "From" engine.'); return; }
+  const out = to === 'codename' ? toCodename(ir) : to === 'gapple' ? toGapple(ir) : to === 'kade' ? toKade(ir) : toPsych(ir);
+  $('out').value = JSON.stringify(out, null, 1);
+  window.__name = (ir.name || 'chart').replace(/[^\w-]+/g, '-') + '-' + to;
+  add('ok', 'Converted ' + NAMES[from] + ' to ' + NAMES[to] + ': ' + ir.notes.length + ' notes, ' + ir.events.length + ' events, ' + ir.bpms.length + ' BPM point(s).');
+  warns.forEach(w => add('warn', w));
+}
+
+$('go').onclick = convert;
+$('fileIn').onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { $('src').value = r.result; convert(); }; r.readAsText(f); };
+$('copy').onclick = async () => {
+  const o = $('out'); if (!o.value) return;
+  try { await navigator.clipboard.writeText(o.value); $('copy').textContent = 'Copied'; }
+  catch (e){ o.select(); $('copy').textContent = 'Selected: copy manually'; }
+  setTimeout(() => $('copy').textContent = 'Copy', 1800);
+};
+$('dl').onclick = () => {
+  const v = $('out').value; if (!v) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([v], {type:'application/json'}));
+  a.download = (window.__name || 'chart') + '.json'; a.click();
+};
+</script>
+</body>
+</html>
